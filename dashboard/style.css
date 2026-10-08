@@ -1,0 +1,886 @@
+/* DormMate 多节点 Dashboard
+   颜色以角色（role）命名，深浅色只在这里切换，下面各组件只引用角色。
+   这套 token 和 web/style.css 是同一套，两个页面的卡片配色因此保持一致。 */
+
+:root {
+  color-scheme: light;
+
+  /* 版面与墨色 */
+  --page:           #f9f9f7;
+  --surface-1:      #fcfcfb;
+  --text-primary:   #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted:     #898781;
+  --hairline:       #e1e0d9;
+  --border:         rgba(11, 11, 11, 0.10);
+  --focus:          #2a78d6;   /* 输入框聚焦环，纯 UI 用色，不代表任何状态 */
+
+  /* 状态色：固定四档，不随主题变化，永远配图标 + 文字，不靠颜色单独表意 */
+  --status-good:     #0ca30c;  /* 正常 */
+  --status-warning:  #fab219;  /* 偏冷 */
+  --status-serious:  #ec835a;  /* 偏湿 */
+  --status-critical: #d03b3b;  /* 偏热 */
+
+  /* 图表序列色。状态色是保留色，不能拿来当序列色，所以另起两个色相。
+     这两组值跑过 dataviz 的 validate_palette.js：OKLCH 亮度带、色度下限、
+     色觉模拟（protan/deutan）分离度、与 --surface-1 的对比度全部通过。
+     改之前先重跑校验，别凭眼睛挑。 */
+  --chart-temp:     #2a78d6;
+  --chart-humidity: #c9407f;
+  --chart-grid:     rgba(11, 11, 11, 0.08);   /* 网格要退到背景里 */
+
+  /* 字体不随深浅色变，只在 :root 定义一次 */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+               "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --page:           #0d0d0d;
+    --surface-1:      #1a1a19;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --hairline:       #2c2c2a;
+    --border:         rgba(255, 255, 255, 0.10);
+    --focus:          #3987e5;
+
+    /* 深色不是把浅色翻转，是各模式各取一档，同样跑过校验 */
+    --chart-temp:     #4a8fe0;
+    --chart-humidity: #c05c8e;
+    --chart-grid:     rgba(255, 255, 255, 0.10);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.wrap {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+}
+
+code, .mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+}
+
+code {
+  padding: 1px 5px;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+}
+
+/* ---------- 顶栏 ---------- */
+
+.top {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.top h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 650;
+}
+
+.sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.top-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border-radius: 9px;
+  border: 1px solid transparent;
+  padding: 9px 16px;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.primary {
+  background: var(--text-primary);
+  color: var(--page);
+  font-weight: 600;
+}
+
+.primary:hover { opacity: 0.88; }
+
+.ghost {
+  background: var(--surface-1);
+  color: var(--text-secondary);
+  border-color: var(--hairline);
+}
+
+.ghost:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+/* ---------- 连接状态 ---------- */
+
+/* 和 web/style.css 里的 .conn 是同一套：class 名、状态变量都一致，
+   两个页面看起来才像一套东西。
+   这里确实借用了状态色（黄=连接中、绿=已连接、红=失败）。状态色本来说好是
+   保留给环境状态的，但这一处在顶栏，离下面那三张状态卡很远，不会被误读成
+   「这个宿舍偏冷」—— 而且网页那边已经这么用了，改成另一套反而两边不像。 */
+.conn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-1);
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.conn-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--status-warning);   /* 默认 = 连接中 */
+}
+
+.conn--on  .conn-dot { background: var(--status-good); }
+.conn--off .conn-dot { background: var(--status-critical); }
+
+/* core 心跳那一条（Phase9 D4）。和上面的 .conn 并排，所以样式上要一眼分得出
+   是两件事：这条**不带圆点**（圆点已经成了「连接」那个意思），靠颜色和边框虚线
+   区分。
+
+   ★ 文字本身说了算，颜色只是辅助 —— stale 那一句写的是「core 没声了：……」，
+   去掉颜色照样读得懂。色觉障碍、黑白打印、强制高对比模式下都还在。 */
+.core-hint {
+  padding: 5px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* 还没收到快照 / 心跳被关掉：不表态，用中性色。**不是**红色 ——
+   「还没收到」和「收到了但很旧」是两件事，后者才是要报警的那一种。 */
+.core-hint--live  { color: var(--text-secondary); border-color: var(--border); }
+.core-hint--stale {
+  color: var(--status-critical);
+  border-color: var(--status-critical);
+  border-style: solid;
+}
+
+.sub code {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* ---------- 当前重点一行（Step 8-3｜B4） ---------- */
+
+/* 顶部这块面板里只有一行的位置。它是页面上第一块东西，所以不再额外留上边距；
+   下边距由 .panel 自己带（见上面 .panel 那条）。 */
+.focus-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 那一行和「语音提醒」按钮并排。按钮 flex:0 0 auto，不管左边那句话有多长，
+   它都待在右上角 —— 位置固定的按钮才找得快。 */
+.focus-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.focus-row .focus-slot { flex: 1 1 auto; min-width: 0; }
+
+/* 念的是哪一句。用弱色、小一号：它是给「没听见」或「想确认」的人看的，
+   不是每时每刻都要占注意力的东西。空着的时候不占高度。 */
+.speak-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.speak-note:empty { display: none; }
+
+/* 全正常时是个 <p>，有优先节点时是个 <button>。
+   两者共用这套外观 —— 换的只是能不能点，不是整块版面的样子；
+   版面一跳，看的人会以为出了什么事。 */
+.focus {
+  --c: var(--text-muted);   /* 全正常（以及未识别状态）时的兜底 */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  width: 100%;
+  margin: 0;
+  padding: 14px 18px;
+  text-align: left;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-left: 4px solid var(--c);
+  border-radius: 12px;
+}
+
+/* 只给按钮加悬停，别让那个 <p> 也像能点 */
+button.focus:hover { border-color: var(--text-muted); }
+
+/* 已经在看这个节点了。用的是和卡片选中**一模一样**的中性描边 ——
+   「选中」和「这个宿舍在报警」是两件事，描边要是跟着 --c 走，
+   这两件事就变成同一个视觉信号了。 */
+.focus.is-active {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--text-primary) inset;
+}
+
+/* 「当前重点」这个标签。和卡片上那个「查看中」同一套做法：
+   黑底白字的小胶囊，不靠颜色单独表意。 */
+.focus-tag {
+  flex: 0 0 auto;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--text-primary);
+  color: var(--page);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* 状态图标（太阳 / 雪花 / 水滴 / 对勾）。
+   8-3 把「偏热」那两个字从这一行里去掉了（分工），但**颜色不能就此单独表意** ——
+   所以留着这个图标：形状本身就把四种状态区分开了，颜色只是让它在三步之外
+   也能被看见。和卡片、和 7-1 那条栏用的是同一套 ICONS。
+
+   align-self: center 是必须的：这一行是 baseline 对齐（标签、正文、右端那三个字
+   要坐在同一条基线上），而 SVG 的基线在它自己的底边，按基线摆会整个往下栽。 */
+.focus-icon {
+  flex: 0 0 auto;
+  align-self: center;
+  display: inline-flex;
+  color: var(--c);
+}
+
+/* 全正常时标签退成灰的：这条不是警报，别抢注意力 */
+.focus--calm .focus-tag {
+  background: var(--page);
+  color: var(--text-muted);
+  border: 1px solid var(--hairline);
+}
+
+/* flex: 1 让右边那个「查看详情」一直贴到最右边，不管这句原因有多长 */
+.focus-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.focus--calm .focus-text { color: var(--text-secondary); }
+
+.focus-state {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.focus.is-active .focus-state { color: var(--text-primary); }
+
+/* 第二行起：core 给的那句理由，以及「这个焦点是谁点的」。
+   两者都占满整行（flex-basis: 100%）—— 它们是给第一行那句话作注的，
+   跟着右边那个「查看详情」挤在同一行会被压成一条读不下去的长句。 */
+.focus-reason,
+.focus-cross {
+  flex: 1 1 100%;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+/* 「谁发的 focus」比那句理由再淡一档、再小一档：它是**来路**，不是**依据**。
+   演示的时候这两行要分得清 —— 上面那行是「为什么是它」（数据说的），
+   下面那行是「谁点的」（人点的），两者说的不是同一件事。 */
+.focus-cross {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* ---------- 节点卡片 ---------- */
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+/* 还没收到 core 快照时，网格里那一段说明。
+   grid-column: 1 / -1 是必须的 —— 不写的话它会被当成第一格，
+   挤在左边那 240px 里，右边空出两格看着像卡片没画出来。 */
+.cards-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 28px 20px;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--text-muted);
+  background: var(--surface-1);
+  border: 1px dashed var(--hairline);
+  border-radius: 12px;
+}
+
+/* 卡片本身就是按钮：整张可点，键盘也能 Tab 到。所以要把按钮的默认样式清掉 */
+.card {
+  --c: var(--text-muted);   /* 未识别状态时的兜底 */
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px;
+  text-align: left;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-left: 4px solid var(--c);
+  border-radius: 12px;
+}
+
+.card:hover { border-color: var(--text-muted); }
+
+/* 当前正在查看的节点。描边刻意用中性墨色而不是 --c：--c 是状态色，
+   拿它描边会让「选中」和「这个节点在报警」变成同一件事，分不出来。
+   所以选中用中性描边 + 一个写着字的标签（不靠颜色单独表意）。 */
+.card.is-active {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 1px var(--text-primary) inset;
+}
+
+.card.is-active .node-name::after {
+  content: "查看中";
+  margin-left: 8px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--text-primary);
+  color: var(--page);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  vertical-align: 2px;
+}
+
+.card.is-empty {
+  border-left-color: var(--hairline);
+  color: var(--text-muted);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.node-name {
+  font-size: 17px;
+  font-weight: 650;
+  font-family: var(--font-mono);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--c) 12%, transparent);
+  color: var(--c);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.badge svg { display: block; }
+
+.badge--wait {
+  --c: var(--text-muted);
+  background: var(--page);
+  font-weight: 500;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.tile-label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.tile-value {
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.tile-unit {
+  margin-left: 2px;
+  font-size: 14px;
+  font-style: normal;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.card-foot,
+.card-wait {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 卡片上的处理状态（「处理中｜风扇已开启」）。
+   刻意**不用**状态色：状态色是保留给环境状态的（那枚 badge 已经用掉了），
+   再拿它标处理进度，同一个卡片上就有两种东西在抢同一个颜色信号。
+   这里用中性墨色 + 一个左边的小竖线，够醒目又不冒充状态。 */
+.card-action {
+  padding-left: 9px;
+  border-left: 2px solid var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* 状态四档。class 名和 web/style.css 一致 */
+.is-good     { --c: var(--status-good); }
+.is-warning  { --c: var(--status-warning); }
+.is-serious  { --c: var(--status-serious); }
+.is-critical { --c: var(--status-critical); }
+.is-unknown  { --c: var(--text-muted); }
+
+/* ---------- 处理动作 ---------- */
+
+/* 按钮 + 旁边那行字。和 .panel-head 一样会换行：字号不变、窄屏时文字
+   掉到按钮下面，而不是把那行字挤成竖着的一列。 */
+.action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+  margin-bottom: 16px;
+}
+
+/* 按不动的时候说明白为什么。只降不透明度的话，浅色底上还是像能点，
+   所以连光标一起换掉 —— 光标的形状是「这个能不能按」最直接的信号。 */
+.action-bar button:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.action-state {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* ---------- 面板 ---------- */
+
+.panel {
+  padding: 20px;
+  margin-bottom: 28px;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+}
+
+.panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.panel-head h2 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+#detail-node {
+  font-family: var(--font-mono);
+  color: var(--focus);
+}
+
+.count,
+.note {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 「ML 辅助判断」那段结论（Step 9-3 进阶项）。比 .note 大一号：它是那一块的
+   正话，读的是那一句，下面那行小字才说明它打哪儿来。
+   左边那道竖线是「这一句是别处算的」的记号 —— 同一段字 report.html 里也有
+   一份，两个地方长得像一点，看的人更容易认出是同一句话。 */
+.ml-text {
+  margin: 0 0 8px;
+  padding-left: 12px;
+  border-left: 3px solid var(--hairline);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+/* 紧跟结论那行说明。`.note` 只管字号和颜色，`<p>` 自己的上下边距还留着，
+   这里去掉 —— 上面那句和它是同一段话的两半，不该被一段空白隔开。
+   （空着的时候不留高度，和 `.speak-note` 一个处理。） */
+.ml-text + .note {
+  margin: 0;
+}
+
+.ml-text + .note:empty { display: none; }
+
+.chart-note:empty { display: none; }
+
+/* 「那条指令发给 core 没有」（Step D3 收尾）。空着就整行不出现 —— 没按过按钮
+   的时候它在页面上不该占位置。它紧跟操作栏，所以自带的上边距要收掉，
+   否则按钮和趋势图之间会多出一段空。 */
+.cmd-note:empty { display: none; }
+
+.cmd-note {
+  margin: -6px 0 14px;
+}
+
+.chart-note.is-error {
+  padding: 10px 14px;
+  margin: 0 0 14px;
+  background: color-mix(in srgb, var(--status-critical) 8%, transparent);
+  border-left: 3px solid var(--status-critical);
+  border-radius: 8px;
+  color: var(--status-critical);
+}
+
+/* ---------- 3D 视图 ---------- */
+
+.scene-box { margin: 0 0 20px; }
+
+.scene-box figcaption {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* 三条和 three/index.html 里 #scene 那份一样，理由也一样：
+   高度必须是确定的（读不到 clientHeight 就算不出宽高比）、
+   overflow: hidden（setSize 和容器差一像素就会顶出滚动条）、
+   position: relative（下面 .scene-label 靠它定位）。
+   高度用固定值而不是 vh：它嵌在面板里，跟着视口高矮变的话，
+   图表会被挤得忽上忽下。
+
+   max-width 是为了画幅比例：相机是 scene.js 里定死的（位置 + 竖直张角 50°），
+   容器越扁，房间在画面里占的比例越小 —— 铺满整个面板（约 1000×380）时
+   房间只占中间一小块，四周全是空地面。760/380 ≈ 2:1，
+   和 three/index.html 那个 60vh 的画幅基本一致，同一个相机在两边看到的构图就一样。 */
+#scene3d {
+  position: relative;
+  overflow: hidden;
+  height: 380px;
+  max-width: 760px;
+  background: #ececea;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+}
+
+/* setLabel 写字的覆盖层，由 three/scene.js 建出来挂进 #scene3d。
+   和 three/index.html 里那份是同一套样式，这里各留一份：两个页面互不依赖。
+
+   这里用主题变量而不是写死的色值 —— 看板有深色模式，覆盖层得跟着变；
+   three/ 那个页面没有深色模式，所以那边是写死的。
+
+   pointer-events: none 是关键：不写的话这层会吃掉鼠标事件。 */
+.scene-label {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  pointer-events: none;
+  padding: 6px 11px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--surface-1) 86%, transparent);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  backdrop-filter: blur(3px);
+}
+
+/* 这台设备没有 WebGL 时，scene.js 会把原因写进容器里（见那边的 try/catch） */
+.scene-error {
+  margin: 0;
+  padding: 20px;
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--status-critical);
+}
+
+/* ---------- 图表 ---------- */
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.chart-box {
+  margin: 0;
+}
+
+.chart-box figcaption {
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* Chart.js 用 maintainAspectRatio:false 时，画布会撑满父元素，
+   所以父元素必须有个确定的高度，否则高度塌成 0。 */
+.chart-canvas {
+  position: relative;
+  height: 240px;
+}
+
+.charts.is-broken .chart-canvas {
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--hairline);
+  border-radius: 10px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.charts.is-broken .chart-canvas::after { content: "图表未加载"; }
+
+/* ---------- 消息日志 ---------- */
+
+.table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+th, td {
+  padding: 9px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--hairline);
+  white-space: nowrap;
+}
+
+td:last-child { white-space: normal; }
+
+th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: var(--page);
+}
+
+tbody tr:last-child td { border-bottom: none; }
+
+.log-empty {
+  padding: 22px 12px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.level {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.level--ok {
+  background: color-mix(in srgb, var(--status-good) 12%, transparent);
+  color: var(--status-good);
+}
+
+.level--warn {
+  background: color-mix(in srgb, var(--status-warning) 18%, transparent);
+  color: #8a5a00;
+}
+
+.level--error {
+  background: color-mix(in srgb, var(--status-critical) 12%, transparent);
+  color: var(--status-critical);
+}
+
+/* 有问题的行整行淡淡染一下，扫一眼就能找到 */
+.log-row--warn  { background: color-mix(in srgb, var(--status-warning) 6%, transparent); }
+.log-row--error { background: color-mix(in srgb, var(--status-critical) 6%, transparent); }
+
+@media (prefers-color-scheme: dark) {
+  .level--warn { color: var(--status-warning); }
+}
+
+/* ---------- 事件记录（Step 7-4） ---------- */
+
+/* 「优先关注」和「处理动作」这两列放的是「时间 + 一句原因」，原因可以有
+   二十来个字。全局那条 th,td{white-space:nowrap} 会把它撑成一条长线，
+   整张表就得横向滚 —— 这两列允许换行。
+   其它列（时间、节点名、问题、结果）仍然 nowrap：它们本来就短，
+   从中间断开只会更难读。 */
+.ev-cell {
+  white-space: normal;
+  min-width: 180px;
+  max-width: 300px;
+}
+
+/* 原因比时间淡一档、小一档，而且另起一行。
+   它是解释不是数据 —— 压在时间下面，眼睛才先看到「什么时候」、
+   再看到「为什么」；挤在同一行里两个都读不痛快。 */
+.ev-reason {
+  display: block;
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* 还没发生的格子。用一个破折号而不是留空：
+   留空看着像「这一列没数据/加载失败」，破折号是「这里本来就没有」。 */
+.ev-none {
+  color: var(--text-muted);
+}
+
+/* 结果那格。和 .level 同一套做法：小胶囊。
+   「已恢复」和「进行中」都是**写着字**的，不是只靠颜色区分 ——
+   色觉障碍、黑白打印、系统强制高对比模式下都还得能读出来。 */
+.ev-result {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ev-result--done {
+  background: color-mix(in srgb, var(--status-good) 12%, transparent);
+  color: var(--status-good);
+}
+
+/* 还没结案的那条用中性灰，不用状态色：它说的是「还没有结论」，
+   不是某一档环境状态。染成黄的会让人以为它自己代表一种天气。 */
+.ev-result--open {
+  background: var(--page);
+  color: var(--text-muted);
+  border: 1px solid var(--hairline);
+}
+
+/* ---------- 被拒绝消息（Step E3-2） ---------- */
+
+/* 原因那格。core 一次可能给出好几条理由（topic 形状不对 + JSON 解析失败），
+   所以是**一列小胶囊**而不是一句话；每条各自成一个，读的人一眼数得清楚
+   这一条报文错在哪几处。 */
+.rj-reasons {
+  white-space: normal;      /* 和事件表那两列同理：这里放的是句子，不是数据 */
+  min-width: 160px;
+  max-width: 260px;
+}
+
+.rj-reason {
+  display: inline-block;
+  margin: 0 4px 4px 0;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  /* 用警告色而不是错误色：core 拒收一条消息是**正常工作**（D4 就是专门
+     演示这件事的），不是系统出了故障。整块染红会让人以为哪里崩了。 */
+  background: color-mix(in srgb, var(--status-warning) 12%, transparent);
+  color: var(--status-warning);
+}
+
+/* 原文。等宽字体 + 允许换行 + 保留空白：
+   「哪里写错了」全靠这一格，而坏报文里最常见的就是空格、引号、少一个花括号
+   —— 用比例字体显示并且把连续空格折成一个的话，错误正好被藏掉。
+   `white-space: pre-wrap` 同时做到「按原样排版」和「长到出格就换行」，
+   所以最长的那串也不会把整张表顶出横向滚动条。 */
+.rj-payload {
+  display: block;
+  max-width: 420px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--page);
+  border: 1px solid var(--hairline);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: var(--text-secondary);
+}
+
+/* ---------- 实时 Rule-ML 对照（Phase8 D5） ---------- */
+
+/* 两边判得不一样的行染一下。**和上面 .log-row--warn 是同一个做法**（整行淡染、
+   不加左边那道竖条），所以看板上「该多看一眼的行」全是一个长相。
+
+   用警告色不用错误色：规则和 ML 分家**不是故障**，它正是这一块要展示的现象 ——
+   规则看的是「越没越线」，ML 看的是「像不像这个宿舍平时」，两者本来就会分家。
+   染成红色会让人以为哪里坏了，接着去查一个根本不存在的 bug。 */
+tbody tr.mlc-mismatch { background: color-mix(in srgb, var(--status-warning) 8%, transparent); }
+
+/* ---------- 页脚 ---------- */
+
+
+.foot {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.9;
+  color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation: none !important; }
+}

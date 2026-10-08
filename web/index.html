@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DormMate 宿舍环境监测</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div>
+      <h1>DormMate 宿舍环境监测</h1>
+      <p class="sub">多节点宿舍环境助手 · M1 单节点实时链路</p>
+    </div>
+    <div class="top-actions">
+      <span id="conn" class="conn conn--pending">
+        <span class="conn-dot" aria-hidden="true"></span>
+        <span id="conn-text">连接中…</span>
+      </span>
+      <button id="theme" class="ghost" type="button">深色</button>
+    </div>
+  </header>
+
+  <!-- 这四行里的地址和 topic 都由 script.js 从 shared/config.js 填（起手写在
+       标签里的那串只是没跑 JS 时的兜底）。规格以 config.js 为准：同一个字面量
+       只该有一处出处，tests/config.test.js 盯的就是这个。 -->
+  <p class="meta">
+    Broker <code id="broker-label">ws://localhost:9001</code>
+    · 订阅 <code id="topic-label">dormmate/v1/nodes/+/telemetry</code>
+    · 快照 <code id="state-label">dormmate/v1/state</code>
+    · 指令 <code id="cmd-label">dormmate/v1/cmd</code>
+  </p>
+
+  <section class="panel">
+    <h2>手动录入分析</h2>
+    <form id="manual-form" class="manual" novalidate>
+      <div class="field">
+        <label for="temp-input">温度（℃）</label>
+        <input id="temp-input" type="text" inputmode="decimal"
+               autocomplete="off" placeholder="-20 ~ 60">
+      </div>
+      <div class="field">
+        <label for="hum-input">湿度（%）</label>
+        <input id="hum-input" type="text" inputmode="decimal"
+               autocomplete="off" placeholder="0 ~ 100">
+      </div>
+      <button class="primary" type="submit">分析</button>
+    </form>
+    <p id="manual-error" class="form-error" role="alert"></p>
+    <div id="manual-result" class="manual-result" hidden></div>
+
+    <div class="history">
+      <div class="history-head">
+        <h3>录入历史 <span id="history-count" class="count"></span></h3>
+        <div class="head-actions">
+          <span id="export-note" class="note" role="status"></span>
+          <button id="export" class="ghost" type="button">导出 CSV</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th class="num">温度 ℃</th>
+              <th class="num">湿度 %</th>
+              <th>状态</th>
+            </tr>
+          </thead>
+          <tbody id="history-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel voice">
+    <h2>语音指令</h2>
+    <div class="voice-actions">
+      <button id="voice-start" class="primary" type="button">语音指令</button>
+      <span id="voice-note" class="note" role="status"></span>
+    </div>
+    <p id="voice-error" class="form-error" role="alert"></p>
+
+    <div class="voice-stage">
+      <div class="voice-box">
+        <div class="voice-label">识别到的文字</div>
+        <!-- 起手带 is-placeholder：占位文案用弱色，认出真结果后 JS 把它摘掉 -->
+        <p id="voice-heard" class="voice-text is-placeholder">点「语音指令」开始说话</p>
+      </div>
+      <div class="voice-box">
+        <div class="voice-label">执行结果</div>
+        <p id="voice-action" class="voice-text is-placeholder">还没有执行过指令</p>
+      </div>
+    </div>
+
+    <!-- 焦点那一行由 web/multimodal.js 按 core 的快照画（focus > priority）。
+         它同时是「说『记录现场』会挂到哪一间」的答案，所以演示时先看这一行。 -->
+    <p id="voice-focus" class="voice-text is-placeholder">当前焦点：等 core 的第一帧快照…</p>
+
+    <p class="voice-hint">
+      能说的四句：<b>查看 + 宿舍名</b>（切全局焦点，例：「查看 dorm-b」）·
+      <b>记录现场</b>（拍照，水印带宿舍 / 事件编号 / 时刻，文件信息发给 core）·
+      <b>朗读状态</b>（按 core 的快照念选中那间的温湿度、状态、事件）·
+      <b>开始处理</b>（把 handle 发给 core，本地不改状态）。
+      宿舍名认「dorm-b」「Dorm B」「dormb」，也认「第二个」「三号」。
+    </p>
+
+    <!-- 浏览器限制写在这里而不是只写在 README 里：人是在这个页面上踩到它的。
+         识别和摄像头都要**安全上下文** —— localhost / https 算，局域网 IP 走
+         http 不算，file:// 也不算。演示请用 http://localhost:8000。 -->
+    <p class="voice-hint">
+      ⚠ 语音识别和摄像头只在<b>安全上下文</b>下可用：<code>http://localhost:8000</code>
+      或 https 可以，<code>file://</code> 打开、以及手机扫局域网 IP（<code>http://192.168.x.x</code>）
+      会被浏览器拦掉。语音识别还要联网（Chrome 把录音传到云端识别）；语音播报在本机合成，断网也能念。
+    </p>
+  </section>
+
+  <section class="panel camera">
+    <h2>现场快照</h2>
+    <div class="camera-actions">
+      <button id="cam-open" class="primary" type="button">打开摄像头</button>
+      <button id="cam-shot" class="ghost" type="button" disabled>拍照</button>
+      <span id="cam-note" class="note" role="status"></span>
+    </div>
+    <p id="cam-error" class="form-error" role="alert"></p>
+
+    <div class="camera-stage">
+      <div class="camera-box">
+        <!-- playsinline 是给 iOS 的：不加的话 Safari 会劫持成全屏播放器。
+             muted 是为了让自动播放不被拦（有声音的自动播放浏览器一律拦）。
+             hidden 起手藏起来：没有流的时候 video 高度是 0，会塌成一条缝。 -->
+        <video id="cam-video" playsinline autoplay muted hidden></video>
+        <p id="cam-preview-hint" class="camera-hint">摄像头未开启</p>
+      </div>
+      <figure class="camera-box">
+        <img id="cam-image" alt="现场快照" hidden>
+        <p id="cam-shot-hint" class="camera-hint">还没有快照</p>
+        <figcaption id="cam-caption" class="camera-caption" hidden></figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section id="cards" class="cards" aria-live="polite"></section>
+
+  <div id="empty" class="empty">
+    等待数据…
+    <span>请确认 Mosquitto 已启动，且 <code>simulator.py</code> 正在发布。</span>
+  </div>
+
+  <section class="log">
+    <div class="log-head">
+      <h2>最近消息 <span id="log-count" class="count"></span></h2>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>时间</th>
+            <th>节点</th>
+            <th class="num">温度 ℃</th>
+            <th class="num">湿度 %</th>
+            <th>状态</th>
+          </tr>
+        </thead>
+        <tbody id="log-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="foot">
+    状态判定规则（按顺序，命中即停）：<code>&lt;18</code> 偏冷 →
+    <code>≥30</code> 偏热 → <code>湿度 ≥75</code> 偏湿 → 正常
+  </footer>
+
+</div>
+
+<script src="vendor/mqtt.min.js"></script>
+<!-- config.js 必须在 script.js **之前**：script.js 起手就要 window.DormMateConfig，
+     读不到会当场 throw（宁可当场点名缺了什么，也不要在后面报一句看不出所以然的
+     「Cannot read properties of undefined」）。 -->
+<script src="../shared/config.js"></script>
+<script src="../shared/rules.js"></script>
+<script src="script.js"></script>
+<!-- Phase6 E2 的多模态（语音 + 拍照上报）。type="module" 是必须的：它 import
+     ../dashboard/logic.js 里的纯函数（朗读那句、选中的是哪一间），而 logic.js
+     是 ES 模块。模块脚本天生 defer，所以它一定跑在 script.js 之后 —— 那正是它
+     需要的顺序，window.DormMateBridge 那时已经建好了。 -->
+<script type="module" src="multimodal.js"></script>
+</body>
+</html>

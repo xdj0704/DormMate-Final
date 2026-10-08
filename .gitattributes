@@ -1,0 +1,27 @@
+# 第三方文件不做换行转换，保证「下载下来的字节」和「clone 下来的字节」一致。
+#
+# 这几个文件的字节数和 sha256 都写进了 README（3d 那节和 5-3/5-4 那节各一张表）。
+# 本仓库 core.autocrlf=true，如果不在这里拦一下，clone 出来会被换成 CRLF：
+# 实测 three/lib/three.module.js 会从 1272972 变成 1326016 字节，哈希随之全变，
+# 照着 README 核对的人只会以为自己下错了文件。
+#
+# 用 text eol=lf 而不是 -text：
+#   两者都保证检出到 worktree 的就是 LF（字节可复现）；
+#   但 -text 会让 Git 把它当二进制，git diff 退化成「Binary files differ」，
+#   将来升级 three 或 Chart.js 版本时看不清到底改了什么。
+#   text eol=lf 仍然按文本处理，diff 照常可用。
+#
+# 注：这几个文件上游本来就是纯 LF（实测 CRLF 计数为 0），
+# 所以「归一化成 LF」对内容是个空操作 —— 哈希不变。
+three/lib/**        text eol=lf
+dashboard/lib/** text eol=lf
+web/vendor/**    text eol=lf
+
+# data/ 里的 CSV 反过来：它们**就该是 CRLF**（RFC 4180，Excel 打开也规矩），
+# 生成脚本 write_csv() 用的也是 CRLF + UTF-8 BOM。
+# 测试里有几条是逐字节比对的（Step 9-1 的历史 / 新数据那两份，连 BOM 和 CRLF
+# 一起比），所以检出到 worktree 的字节必须是定的那一种：
+#   只靠 core.autocrlf=true 的话，本机是 CRLF、别人的机器上未必 —— 那边一 clone
+#   出来就是 LF，逐字节比对当场红，而红的原因是「谁 clone 的」。
+# text eol=crlf：仓库里存 LF（和现在一样，内容不变），谁检出都拿到 CRLF。
+data/*.csv       text eol=crlf

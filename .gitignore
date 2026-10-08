@@ -1,0 +1,74 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+.vscode/
+*.log
+
+# 微信开发者工具的本机私有配置（热重载、libVersion、编译开关等），
+# 每个人机器上都不一样，官方模板默认也是忽略它的。
+# project.config.json 要提交，这个不用。
+miniapp/project.private.config.json
+
+# broker/mosquitto.conf 是 mosquitto/dormmate.conf 的手抄副本（只有 5 行、
+# 没注释也没开日志），真正在用的是 mosquitto/dormmate.conf，
+# start_broker.bat 指向的也是那一份。这两份要是都入库，早晚会有人改了其中
+# 一份、另一份悄悄跑偏，所以这里让副本保持不跟踪。
+# 写进忽略列表而不是只靠「记得别 add」，是为了防 git add -A 手滑把它带进去。
+# 哪天真要收编它，用 git add -f broker/mosquitto.conf 就行。
+broker/
+
+# 这两个是练习时试手写的草稿，不是项目的一部分：
+#   analysis_no_pandas.py —— 不依赖 pandas 的 CSV 读法实验，自己写死了
+#     文件名 "dormmate (2).csv"，和主流程的 analysis/analysis.py 没有关系
+#   dormmate (2).csv      —— 上面那个脚本的输入，GBK 编码、62 字节，
+#     和主流程那几份 UTF-8 + BOM 的 CSV 不是一个口径，混进仓库只会让人
+#     以为「项目里有个 GBK 的 CSV」
+# 留在盘上照旧能跑，只是不进仓库。哪天真要收编，git add -f 就行。
+analysis_no_pandas.py
+dormmate (2).csv
+
+# data/events.json 是 core 跑起来之后自己写的事件记录（D3），不是源码。
+# 它每次跑都在变，而且里面全是「几点几分谁家偏热了」这种本机现场数据 ——
+# 入库的话每次演示完都会多一个「改动」，真正要提交的东西反而被淹掉。
+# 它的格式和生成规则在 events.py 里；要看内容就自己跑一遍 d3_event.json。
+# （data/ 下那几份 *_sim.csv / dormmate.csv 是**输入**，那些要提交。）
+data/events.json
+data/events.json.bad
+data/events.json.tmp
+
+# data/history.csv 是 Phase7 起 core 每收到一条合法遥测就追加一行的历史表
+# （Phase7 是九列，Phase8 D5 起十列 —— 多了 agree，见 history.py 的 HEADER）。
+# 和 events.json 完全同一个道理：
+# 它是**运行期**产生的数据，一秒一行、每次跑都在变，入库的话每回演示完
+# 都会多一个「改动」，真正要提交的东西反而被淹掉。
+# data/ 下那几份 *_sim.csv / constructed_samples.csv 是**输入**，那些要提交。
+data/history.csv
+
+# Phase7 那三份报告是 analysis/make_report.py 的输出（--csv 指哪份输入，名字就
+# 跟着是哪份）。不跟踪的原因是它们**必须**由脚本重新生成：
+#
+#   1. 一个替换一份 CSV 就是一次全量重排 —— 几百 KB 的 HTML，改一行代码就
+#      整篇变样，进仓库只会把真正要提交的东西淹在 diff 里；
+#   2. 「报告结果禁止手工修改」这条约束的前提就是「报告是跑出来的」，一旦
+#      入库，看到的人第一反应是去改文件而不是改输入再跑一遍；
+#   3. history-report.html 的输入 data/history.csv 本来就是运行期数据、上面
+#      刚忽略掉，这份报告离开那台机器就**再也复现不出来**，单独入库是孤儿。
+#
+# 想留档就直接把 HTML / 截图交上去，或者 git add -f 强制加。
+# 注意：report/report.html（Phase7 之前 analysis/analysis.py 那份）**不在**
+# 这个列表里，它是早就入库的交付物，别一起忽略了。
+report/history-report.html
+report/day-sim-report.html
+report/constructed-report.html
+
+# models/ 是 Phase8 D5 的训练产物：analysis/train_iforest.py 按 data/history.csv
+# 给每个宿舍训一个 Isolation Forest，写在这里（.joblib + MANIFEST.json）。
+# 不入库的理由和上面那几份报告一样 —— 它由输入唯一决定，重跑一条命令就有：
+#     py -3.14 analysis/train_iforest.py --csv data/history.csv --out-dir models
+# 而 .joblib 是二进制、几十 KB 起步，每次灌一批新历史就整份变样，
+# 进仓库只会把真正要提交的东西淹在 diff 里。
+# 要留档就把 MANIFEST.json 和训练时的终端输出交上去（那里面才有信息量：
+# 用了哪份 CSV、每个宿舍几条、sklearn 什么版本）。
+models/
