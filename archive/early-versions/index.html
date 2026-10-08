@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>DormMate 宿舍温湿度监控</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+</head>
+<body>
+    <h1>宿舍温湿度监控面板</h1>
+    <p>温度：<span id="temp">--</span> ℃</p >
+    <p>湿度：<span id="humi">--</span> %</p >
+    <p>状态：<span id="status">--</span></p >
+
+    <button id="exportBtn">导出CSV</button>
+
+    <h3>历史记录</h3>
+    <table border="1">
+        <tr>
+            <th>时间</th>
+            <th>温度</th>
+            <th>湿度</th>
+            <th>状态</th>
+        </tr>
+        <tbody id="tableBody"></tbody>
+    </table>
+
+    <script src="script.js"></script>
+</body>
+</html>

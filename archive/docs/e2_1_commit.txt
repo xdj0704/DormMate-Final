@@ -1,0 +1,101 @@
+feat(core): E2-1 snapshot 指令 —— 拍一张照片，一个状态都不动
+
+Phase6 E2 是多模态交互那一步：web 页面上说「记录现场」，浏览器用 canvas 抓一张
+照片，把**文件信息**发给 core，core 把它登到那一间**开着的事件**的 snapshots 里。
+这一步只做 core 那一半（前端一半是 E2-2 / E2-3）。
+
+为什么照片本身不过来
+指令里带的是 stamp / 宽高 / 字节数 / 文件名 / 前端画的那行水印，图片本体留在
+浏览器里。base64 进来一趟的话，data/events.json 会被几张图撑到几十兆，而那份
+文件是每次 save() 都要整份重写的 —— 它现在就该是一份能直接打开读的案卷。
+代价是 core 手上没有像素，只有「有人拍了一张、多大、什么时候」。这一步要的证据
+本来也是「有人到场并按了快门」，不是那张图。
+
+snapshot 为什么不在 events.COMMANDS 里
+那个元组的含义是**「会去改事件状态的那一组」**（目前只有 handle），而这条一个
+状态都不动：它只往 snapshots 里追加一笔。所以它在 events.py 里有一个常量（事件
+簿得认识这个词），但不进那个元组。core.py 拼出来的完整动词表是
+`events.COMMANDS + (FOCUS, events.SNAPSHOT)` —— 和 focus 一样是「有动作、不进
+状态机」的东西。
+
+红线在这里比 handle 那条更容易滑过去
+handle 改的是「这个宿舍在处理了」，而照片看着像**证据** ——「都拍下来了，那就
+当处理过了吧」这一句真写出来，红线就没了，而且**不会有任何报错**：一个没人按过
+「开始处理」的宿舍会顶着一张照片显示成「处理中」。所以这条约束在三个地方各守
+一道：
+
+  - record_snapshot 的函数体里不许出现 event.state / event.verify / recovered_at
+    / self._close / apply_action（tests/test_events.py 的 TestRedLine 里查源码，
+    和 apply_action / set_focus 那两条并排）；
+  - 它拿不到 NodeState，也不返回任何能改节点状态的东西 —— 结构上做不到；
+  - 发一条真指令跑一遍，拍完 state 还是 OPEN、actions 和 verify 还是空的、
+    快照里 nodes 和 priority 一个字没动（tests/test_core.py 的 TestSnapshotCommand）。
+
+静态那条是必要的：行为测试用的是一条指令，只能证明「这一次」没改。哪天有人加
+一句「拍够三张自动转 HANDLING」，行为测试照样绿。
+
+挂在哪条案卷上由 core 说了算
+前端可以在 eventId 里写上它**以为**的那条，core 拿它只做对账：对不上就不挂，
+**也不往对的那条上挂**。前端以为看的是 A 案、core 手里开着的是 B 案，说明中间
+有人切过焦点；硬挂到 B 上的话，那张照片会安安静静地落在一条前端根本不知道的
+案卷上。空串和缺席是一回事（前端从快照里读 eventId，读到 undefined 拼出来就是
+空串），不能因为「对不上」就拒。
+
+两个时间都记
+stamp 是快门按下去那一刻（前端报的），time 是 core 收到那一刻（core 自己的钟）。
+和 handle 同一条口径：动作什么时候发生的只能问发它的人，core 什么时候知道的
+只能问 core。「照片 20:31 拍的、core 20:33 才收到」这件事只有两个都在才看得出来。
+stamp 必须是个能读的时刻，而且**必填** —— 它补不出来：core 收到这条指令的时候，
+照片早就拍完了。
+
+cameraCount 只报个数，不报内容
+事件那条 view() 里加的是 `cameraCount`，**没有**把 snapshots 塞进去。view() 是
+每来一条遥测就发一次的那一份，整叠 snapshots 进去等于每个周期都把全部水印重发
+一遍（水印里还带着文件名和时间戳）。屏幕要的只是「有几张」，要看得细去读
+data/events.json。
+
+那个数也不能直接写 len(self.snapshots)：案卷上本来就躺着几条状态迁移记录（开案
+那一条一定在），混进去的话一条刚开案、人一张都没拍过的事件会显示成「1 张」。
+所以每条相机记录都打一个显式的 kind（events.CAMERA），计数按 kind 数 —— 比
+「缺了某个字段就是相机」结实：以后再加一种记录（录音？到场照片？）不用重新猜。
+
+水印只留档，不当判据
+那行字是前端**画**上去的，不是算出来的。core 原样留着（事后能拿它和照片上那行
+对），但不检查它写对一个字没有 —— 在里面写「已恢复」也只是多了一行字。长度被
+截到 WATERMARK_MAX_CHARS（200）：案卷是 core 的文件，长度得由 core 说了算，
+不然前端一句话就能把它撑大。截了不报错，那只是一行留档的字。
+
+校验
+validate_command 多了一步 6b：按动作查必填字段（stamp / width / height / bytes，
+少哪个报哪个，缺字段全报成「快照不合法」的话前端还得回来一条条试）、查可选字段
+（eventId / watermark / file，给了但类型不对就拒，**不是悄悄丢掉** —— 丢掉的话
+前端以为记上了而案卷里那一格是空的）。宽高字节数必须是正数：0×0 的照片和 0 字节
+的文件都不存在，收下来案卷上会写着一行「0×0」而没人知道该拿它怎么办。这一步
+放在「action 认过之后」：一条 action 写错的报文不该被报成「缺少 stamp」。
+大小写照旧不折叠（'Snapshot' 不是 'snapshot'），和 handle / focus 一致。
+
+拒绝的措辞点名到具体那一条
+没开案：「dorm-b 现在没有未结案的事件，这张快照没地方可挂（上一条
+dorm-b-20260922-203000 已经是 RECOVERED）」—— 连上一条是谁、什么状态一起说，
+不然人还得自己去翻案卷才知道是结掉的还是压根没开过。对不上时两句 eventId 都
+报出来。
+
+和 handle 一样的语义：**「指令合法」不等于「事情办成了」**
+record_snapshot 拒了的时候 verdict.ok 仍然是 True —— 报文本身没问题（动作认得、
+字段齐全、时刻读得出来），挂不上去是**此刻**的事。混成一个布尔值之后，前端就没
+法区分「我发错了」和「时候不对」。这一条和 handle 那条路一模一样，不是新开的
+口子。
+
+验证
+- Python 324 条全绿（test_core 279 -> 301，test_events 新增 TestCameraSnapshots
+  与四条 TestRedLine / TestConstants）。
+- node tests/config.test.js 49 条全绿：新增「和 events.py 的 SNAPSHOT 是同一个
+  词」「快照没被塞进会改事件状态的那一组」「三个动作名互不相同」三条。焦点那条
+  正则跟着改成 `events.COMMANDS + (FOCUS, events.SNAPSHOT)`。
+- shared/config.js 加 CMD_ACTION_SNAPSHOT，注释里写明「只有 web 页面发」「报文
+  带的是文件信息」「不进 events.COMMANDS」。
+- tests/test_core.py 的 test_all_commands_are_reachable_through_the_same_validator
+  改成按每个动作自己的字段表造报文（COMMAND_SAMPLE_FIELDS 从 core 那张表推出来，
+  不在这边再抄一份）。
+
+Co-Authored-By: Claude Code <noreply@anthropic.com>
